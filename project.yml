@@ -1,0 +1,14 @@
+name: Switch
+options:
+  bundleIdPrefix: com.sanyamgarg
+  deploymentTarget:
+    macOS: "14.0"
+
+targets:
+  Switch:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/Switch
+    info:
+      path: Sources/Switch/Resources/Info.plist
