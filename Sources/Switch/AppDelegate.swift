@@ -1,7 +1,10 @@
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let hotkey = HotkeyManager()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // TODO: install hotkey, set up switcher
+        hotkey.onCmdTab = { print("cmd-tab fired") }
+        hotkey.install()
     }
 }
