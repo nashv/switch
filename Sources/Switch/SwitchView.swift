@@ -11,17 +11,20 @@ struct SwitchView: View {
     var body: some View {
         ZStack {
             VisualEffectBackdrop()
-            ScrollView {
-                LazyVGrid(columns: grid, spacing: Design.tilePadding) {
-                    ForEach(Array(model.windows.enumerated()), id: \.element.id) { idx, win in
-                        Tile(window: win, selected: idx == model.selected)
-                            .onTapGesture {
-                                model.selected = idx
-                                onCommit()
-                            }
+            VStack(spacing: 0) {
+                ScrollView {
+                    LazyVGrid(columns: grid, spacing: Design.tilePadding) {
+                        ForEach(Array(model.windows.enumerated()), id: \.element.id) { idx, win in
+                            Tile(window: win, selected: idx == model.selected)
+                                .onTapGesture {
+                                    model.selected = idx
+                                    onCommit()
+                                }
+                        }
                     }
+                    .padding(Design.tilePadding)
                 }
-                .padding(Design.tilePadding)
+                hintStrip
             }
         }
         .frame(width: Design.panelWidth, height: Design.panelHeight)
@@ -30,6 +33,25 @@ struct SwitchView: View {
         .onKeyPress(.rightArrow) { model.advance(); return .handled }
         .onKeyPress(.return) { onCommit(); return .handled }
         .onKeyPress(.escape) { onCommit(); return .handled }
+    }
+
+    private var hintStrip: some View {
+        HStack(spacing: 14) {
+            if !model.filter.isEmpty {
+                Text(model.filter)
+                    .font(.system(.callout, design: .monospaced))
+                    .foregroundStyle(.primary)
+                Spacer()
+            } else {
+                Spacer()
+            }
+            Text("return / esc / type / ⇧")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
     }
 }
 
@@ -56,5 +78,6 @@ private struct Tile: View {
             RoundedRectangle(cornerRadius: Design.tileCorner)
                 .stroke(selected ? Color.accentColor : Design.stroke, lineWidth: selected ? 2 : 1)
         )
+        .shadow(color: selected ? Color.accentColor.opacity(0.3) : .clear, radius: selected ? 8 : 0)
     }
 }
