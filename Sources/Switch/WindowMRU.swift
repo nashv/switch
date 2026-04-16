@@ -8,20 +8,21 @@ final class WindowMRU {
         order.insert(id, at: 0)
     }
 
-    /// Seed from the OS-provided window list — used on first open before any
-    /// touches have been recorded. Without this the order on first cmd-tab is
-    /// undefined (insertion order from CGWindowListCopyWindowInfo).
     func seedIfEmpty(_ windows: [WindowInfo]) {
         guard order.isEmpty else { return }
         order = windows.map { $0.id }
     }
 
-    func sort(_ windows: [WindowInfo]) -> [WindowInfo] {
+    /// On the ACTIVE Space, trust the OS z-order — that's what users expect
+    /// for "next window." Across Spaces the OS doesn't give us z-ordering
+    /// (no on-screen position), so fall back to our own MRU index.
+    func sort(active: [WindowInfo], offSpace: [WindowInfo]) -> [WindowInfo] {
         let positions = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
-        return windows.sorted { (a, b) -> Bool in
+        let mruSorted = offSpace.sorted { (a, b) -> Bool in
             let pa = positions[a.id] ?? Int.max
             let pb = positions[b.id] ?? Int.max
             return pa < pb
         }
+        return active + mruSorted
     }
 }
