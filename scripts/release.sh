@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Build, sign, notarize, staple, and package Switch for distribution.
+# Usage: scripts/release.sh <version>   (e.g. 0.1.0)
+
+set -euo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_DIR"
+
+VERSION="${1:-}"
+if [[ -z "$VERSION" ]]; then
+    echo "usage: $0 <version>  (e.g. 0.1.0)"
+    exit 1
+fi
+
+NOTARY_PROFILE="switch-notary"
+APP_NAME="Switch"
+TEAM_ID="WCAFS55H9G"
+BUILD_DIR="$PROJECT_DIR/build"
+ARCHIVE_PATH="$BUILD_DIR/$APP_NAME.xcarchive"
+EXPORT_DIR="$BUILD_DIR/export"
+APP_PATH="$EXPORT_DIR/$APP_NAME.app"
+DMG_PATH="$BUILD_DIR/$APP_NAME-$VERSION.dmg"
+DMG_STAGE="$BUILD_DIR/dmg-stage"
+
+echo "==> Cleaning build dir"
+rm -rf "$BUILD_DIR"
+mkdir -p "$EXPORT_DIR"
+
+echo "==> Regenerating Xcode project"
+xcodegen generate
+
+echo "==> Archiving Release build"
+xcodebuild -project "$APP_NAME.xcodeproj" \
+    -scheme "$APP_NAME" \
+    -configuration Release \
+    -destination 'platform=macOS' \
+    -archivePath "$ARCHIVE_PATH" \
+    archive
+
+cat > "$BUILD_DIR/exportOptions.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>developer-id</string>
+    <key>teamID</key>
+    <string>$TEAM_ID</string>
+    <key>signingStyle</key>
+    <string>manual</string>
+</dict>
+</plist>
+EOF
+
+echo "==> Exporting signed app"
+xcodebuild -exportArchive \
+    -archivePath "$ARCHIVE_PATH" \
+    -exportPath "$EXPORT_DIR" \
+    -exportOptionsPlist "$BUILD_DIR/exportOptions.plist"
+
+echo "==> Submitting app to notary service"
+APP_ZIP="$BUILD_DIR/$APP_NAME.zip"
+ditto -c -k --keepParent "$APP_PATH" "$APP_ZIP"
+xcrun notarytool submit "$APP_ZIP" \
+    --keychain-profile "$NOTARY_PROFILE" \
+    --wait
+
+echo "==> Stapling app"
+xcrun stapler staple "$APP_PATH"
+
+echo "==> Building DMG"
+rm -rf "$DMG_STAGE"
+mkdir -p "$DMG_STAGE"
+cp -R "$APP_PATH" "$DMG_STAGE/"
+ln -s /Applications "$DMG_STAGE/Applications"
+
+hdiutil create -volname "$APP_NAME" \
+    -srcfolder "$DMG_STAGE" \
+    -ov -format UDZO \
+    "$DMG_PATH"
+
+echo "==> Submitting DMG to notary service"
+xcrun notarytool submit "$DMG_PATH" \
+    --keychain-profile "$NOTARY_PROFILE" \
+    --wait
+
+echo "==> Stapling DMG"
+xcrun stapler staple "$DMG_PATH"
+
+echo ""
+echo "==> Verify"
+spctl --assess --type execute --verbose "$APP_PATH"
+xcrun stapler validate "$DMG_PATH"
+
+echo ""
+echo "==> Done"
+ls -lh "$DMG_PATH"
+echo ""
+echo "Upload to GitHub Releases:"
+echo "  $DMG_PATH"
