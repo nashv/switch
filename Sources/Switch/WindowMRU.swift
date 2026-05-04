@@ -1,28 +1,45 @@
+import CoreGraphics
 import Foundation
 
-final class WindowMRU {
-    private var order: [CGWindowID] = []
+/// In-memory most-recently-used tracking for windows focused via Switch.
+/// Touched on every focus + close. Sorted output puts most recent first.
+enum WindowMRU {
+    private static let lock = NSLock()
+    private static var stamps: [CGWindowID: Date] = [:]
 
-    func touch(_ id: CGWindowID) {
-        order.removeAll { $0 == id }
-        order.insert(id, at: 0)
+    static func touch(_ id: CGWindowID) {
+        lock.lock(); defer { lock.unlock() }
+        stamps[id] = Date()
     }
 
-    func seedIfEmpty(_ windows: [WindowInfo]) {
-        guard order.isEmpty else { return }
-        order = windows.map { $0.id }
-    }
+    /// Returns `windows` sorted by MRU descending. If `frontmost` is provided, it is pinned to position 0.
+    /// Windows with no MRU stamp fall back to their original enumeration order.
+    static func sorted(_ windows: [WindowInfo], frontmost: WindowInfo?) -> [WindowInfo] {
+        lock.lock()
+        let snapshot = stamps
+        lock.unlock()
 
-    /// On the ACTIVE Space, trust the OS z-order — that's what users expect
-    /// for "next window." Across Spaces the OS doesn't give us z-ordering
-    /// (no on-screen position), so fall back to our own MRU index.
-    func sort(active: [WindowInfo], offSpace: [WindowInfo]) -> [WindowInfo] {
-        let positions = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
-        let mruSorted = offSpace.sorted { (a, b) -> Bool in
-            let pa = positions[a.id] ?? Int.max
-            let pb = positions[b.id] ?? Int.max
-            return pa < pb
+        let rest = windows.filter { $0.id != frontmost?.id }
+        let originalIndex = Dictionary(uniqueKeysWithValues: windows.enumerated().map { ($1.id, $0) })
+        let sorted = rest.sorted { (a, b) in
+            let ta = snapshot[a.id]
+            let tb = snapshot[b.id]
+            switch (ta, tb) {
+            case let (a?, b?): return a > b
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil):
+                return (originalIndex[a.id] ?? 0) < (originalIndex[b.id] ?? 0)
+            }
         }
-        return active + mruSorted
+        if let front = frontmost {
+            return [front] + sorted
+        }
+        return sorted
+    }
+
+    static func purge(keeping ids: Set<CGWindowID>) {
+        lock.lock(); defer { lock.unlock() }
+        stamps = stamps.filter { ids.contains($0.key) }
     }
 }

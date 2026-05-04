@@ -4,16 +4,50 @@ final class StatusBarController {
     private let item: NSStatusItem
 
     init() {
-        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "square.on.square", accessibilityDescription: "Switch")
-            button.image?.isTemplate = true
+            let img = NSImage(systemSymbolName: "square.on.square", accessibilityDescription: "Switch")
+            img?.isTemplate = true
+            button.image = img
         }
+
         let menu = NSMenu()
-        menu.addItem(.init(title: "Quit Switch", action: #selector(quit), keyEquivalent: "q"))
-        for it in menu.items { it.target = self }
+
+        let header = NSMenuItem(title: "Switch", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+
+        menu.addItem(.separator())
+
+        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+
+        let permissions = NSMenuItem(title: "Permissions…", action: #selector(showOnboarding), keyEquivalent: "")
+        permissions.target = self
+        menu.addItem(permissions)
+
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(title: "Quit Switch", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quit.target = NSApp
+        menu.addItem(quit)
+
         item.menu = menu
     }
 
-    @objc private func quit() { NSApp.terminate(nil) }
+    @objc private func showOnboarding() {
+        NotificationCenter.default.post(name: .switchShowOnboarding, object: nil)
+    }
+
+    @objc private func openSettings() {
+        NSApp.activate(ignoringOtherApps: true)
+        // Works on macOS 13+ — selector exists across versions.
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
+}
+
+extension Notification.Name {
+    static let switchShowOnboarding = Notification.Name("com.sanyamgarg.switch.showOnboarding")
 }

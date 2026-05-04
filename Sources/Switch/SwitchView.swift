@@ -1,99 +1,240 @@
 import SwiftUI
 
 struct SwitchView: View {
-    @ObservedObject var model: SwitchModel
-    var onCommit: () -> Void = {}
-
-    /// Cursor must move at least this far from the panel-open position before
-    /// a hover counts as intentional. Was: a static cursor parked over a tile
-    /// at panel-open hijacked the keyboard's default selection.
-    private static let hoverThreshold: CGFloat = 10
-
-    @State private var openCursor: CGPoint?
-
-    private var grid: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: Design.tilePadding), count: Design.columns)
-    }
+    @EnvironmentObject var model: SwitchModel
+    @Namespace private var selectionNS
+    @State private var hoveredID: CGWindowID?
+    @State private var openMouseLocation: CGPoint = .zero
+    @State private var hasMouseMovedSinceOpen = false
+    @State private var lastSelectionFromMouse = false
 
     var body: some View {
-        ZStack {
-            VisualEffectBackdrop()
-            VStack(spacing: 0) {
-                ScrollView {
-                    LazyVGrid(columns: grid, spacing: Design.tilePadding) {
-                        ForEach(Array(model.windows.enumerated()), id: \.element.id) { idx, win in
-                            Tile(window: win, selected: idx == model.selected)
-                                .onTapGesture {
-                                    model.selected = idx
-                                    onCommit()
-                                }
-                                .onHover { inside in
-                                    guard inside else { return }
-                                    if let open = openCursor,
-                                       let cur = NSEvent.mouseLocation as CGPoint?,
-                                       hypot(cur.x - open.x, cur.y - open.y) < Self.hoverThreshold {
-                                        return
-                                    }
-                                    model.selected = idx
-                                }
-                        }
-                    }
-                    .padding(Design.tilePadding)
-                }
-                hintStrip
+        VStack(spacing: 0) {
+            header
+            grid
+            hintStrip
+        }
+        .background(
+            VisualEffectBackdrop(material: .hudWindow, blendingMode: .behindWindow)
+        )
+        .frame(width: 880, height: 560)
+        .scaleEffect(model.visible ? 1.0 : 0.97)
+        .opacity(model.visible ? 1 : 0)
+        .animation(.spring(response: 0.18, dampingFraction: 0.86), value: model.visible)
+        .onChange(of: model.visible) { _, isVisible in
+            if isVisible {
+                openMouseLocation = NSEvent.mouseLocation
+                hasMouseMovedSinceOpen = false
+                lastSelectionFromMouse = false
+                hoveredID = nil
             }
         }
-        .frame(width: Design.panelWidth, height: Design.panelHeight)
-        .onAppear { openCursor = NSEvent.mouseLocation }
-        .onKeyPress(.tab) { model.advance(); return .handled }
-        .onKeyPress(.leftArrow) { model.back(); return .handled }
-        .onKeyPress(.rightArrow) { model.advance(); return .handled }
-        .onKeyPress(.return) { onCommit(); return .handled }
-        .onKeyPress(.escape) { onCommit(); return .handled }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            if !model.filterText.isEmpty {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text(model.filterText)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.primary)
+            }
+            Spacer()
+            if !model.filteredWindows.isEmpty {
+                Text("\(model.filteredWindows.count)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.horizontal, 22)
+        .frame(height: 26)
+    }
+
+    private var grid: some View {
+        ZStack {
+            let list = model.filteredWindows
+            if list.isEmpty {
+                Text(model.filterText.isEmpty ? "No windows" : "No matches")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVGrid(columns: gridColumns, spacing: 14) {
+                            ForEach(Array(list.enumerated()), id: \.element.id) { idx, w in
+                                tile(window: w, index: idx, list: list)
+                                    .id(w.id)
+                            }
+                        }
+                        .padding(.horizontal, 22)
+                        .padding(.top, 0)
+                        .padding(.bottom, 12)
+                    }
+                    .onChange(of: model.selected) { _, new in
+                        // Skip auto-scroll when selection came from mouse hover —
+                        // user is already looking at where they're pointing.
+                        if lastSelectionFromMouse {
+                            lastSelectionFromMouse = false
+                            return
+                        }
+                        let cur = model.filteredWindows
+                        guard cur.indices.contains(new) else { return }
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            proxy.scrollTo(cur[new].id, anchor: .center)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var hintStrip: some View {
         HStack(spacing: 14) {
-            if !model.filter.isEmpty {
-                Text(model.filter)
-                    .font(.system(.callout, design: .monospaced))
-                Spacer()
-            } else {
-                Spacer()
-            }
-            Text("return / esc / type / ⇧")
-                .font(.caption2)
+            hint("return", "switch")
+            hint("esc", "cancel")
+            hint("type", "filter")
+            hint("⇧", "reverse")
+            Spacer()
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 10)
+        .background(Color.black.opacity(0.18))
+    }
+
+    private func hint(_ key: String, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Text(key)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.primary.opacity(0.85))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.white.opacity(0.10))
+                )
+            Text(label)
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
     }
-}
 
-private struct Tile: View {
-    let window: WindowInfo
-    let selected: Bool
+    private var gridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 14), count: 4)
+    }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Rectangle()
-                .fill(Color.gray.opacity(0.18))
-                .aspectRatio(16.0/10.0, contentMode: .fit)
-                .overlay(Text(window.ownerName).font(.caption2))
-            Text(window.title)
-                .font(.caption)
-                .lineLimit(1)
+    private func tile(window: WindowInfo, index: Int, list: [WindowInfo]) -> some View {
+        let selected = index == model.selected
+        let hovered = hoveredID == window.id
+
+        return VStack(alignment: .leading, spacing: 7) {
+            ZStack(alignment: .bottomLeading) {
+                ZStack {
+                    Color.black.opacity(0.22)
+                    if let img = model.thumbnails[window.id] {
+                        Image(nsImage: img)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .padding(6)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .transition(.opacity)
+                    } else if let icon = appIcon(for: window.pid) {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 56, height: 56)
+                            .opacity(0.55)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 130)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .animation(.easeOut(duration: 0.18), value: model.thumbnails[window.id] != nil)
+
+                if let icon = appIcon(for: window.pid) {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 32, height: 32)
+                        .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 1)
+                        .padding(7)
+                }
+            }
+
+            HStack(spacing: 6) {
+                Text(window.appName)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if !window.title.isEmpty {
+                    Text("·")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                    Text(window.title)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 2)
         }
-        .padding(8)
+        .padding(9)
         .background(
-            RoundedRectangle(cornerRadius: Design.tileCorner)
-                .fill(selected ? Color.accentColor.opacity(0.25) : Color.clear)
+            ZStack {
+                if hovered && !selected {
+                    Color.white.opacity(0.06)
+                }
+                if selected {
+                    Color.accentColor.opacity(0.22)
+                        .matchedGeometryEffect(id: "selectionBG", in: selectionNS)
+                }
+            }
         )
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: Design.tileCorner)
-                .stroke(selected ? Color.accentColor : Design.stroke, lineWidth: selected ? 2 : 1)
+            ZStack {
+                if selected {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.7), lineWidth: 1)
+                        .matchedGeometryEffect(id: "selectionRing", in: selectionNS)
+                }
+            }
         )
-        .shadow(color: selected ? Color.accentColor.opacity(0.3) : .clear, radius: selected ? 8 : 0)
+        .shadow(color: .black.opacity(selected ? 0.22 : 0), radius: 12, x: 0, y: 4)
+        .animation(.spring(response: 0.22, dampingFraction: 0.85), value: model.selected)
+        .animation(.easeOut(duration: 0.10), value: hoveredID)
+        .contentShape(Rectangle())
+        .onHover { isHovering in
+            if isHovering {
+                // Ignore hover until cursor has actually moved 10pt+ since panel opened.
+                // Otherwise a static cursor parked over a tile hijacks the default selection.
+                if !hasMouseMovedSinceOpen {
+                    let loc = NSEvent.mouseLocation
+                    let dx = loc.x - openMouseLocation.x
+                    let dy = loc.y - openMouseLocation.y
+                    if hypot(dx, dy) < 10 { return }
+                    hasMouseMovedSinceOpen = true
+                }
+                hoveredID = window.id
+                if model.selected != index {
+                    lastSelectionFromMouse = true
+                    model.selected = index
+                }
+            } else if hoveredID == window.id {
+                hoveredID = nil
+            }
+        }
+        .onTapGesture {
+            lastSelectionFromMouse = true
+            model.selected = index
+            model.commitAndDismiss?()
+        }
+    }
+
+    private func appIcon(for pid: pid_t) -> NSImage? {
+        NSRunningApplication(processIdentifier: pid)?.icon
     }
 }

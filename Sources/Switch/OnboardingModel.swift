@@ -1,50 +1,50 @@
 import AppKit
 import ApplicationServices
-import Combine
-import ScreenCaptureKit
+import CoreGraphics
+import SwiftUI
 
 @MainActor
 final class OnboardingModel: ObservableObject {
-    @Published private(set) var hasAccessibility = false
-    @Published private(set) var hasScreenRecording = false
+    @Published var accessibility = false
+    @Published var screenCapture = false
 
-    private var pollTimer: Timer?
+    private var timer: Timer?
 
-    var allGranted: Bool { hasAccessibility && hasScreenRecording }
+    var allGranted: Bool { accessibility && screenCapture }
 
     func startPolling() {
-        check()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.check() }
+        refresh()
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
         }
     }
 
     func stopPolling() {
-        pollTimer?.invalidate()
-        pollTimer = nil
+        timer?.invalidate()
+        timer = nil
     }
 
-    private func check() {
-        hasAccessibility = AXIsProcessTrusted()
-        Task {
-            do {
-                _ = try await SCShareableContent.current
-                await MainActor.run { self.hasScreenRecording = true }
-            } catch {
-                await MainActor.run { self.hasScreenRecording = false }
-            }
+    func refresh() {
+        accessibility = AXIsProcessTrusted()
+        if #available(macOS 11.0, *) {
+            screenCapture = CGPreflightScreenCaptureAccess()
+        } else {
+            screenCapture = true
         }
     }
 
-    func openAccessibilityPane() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
+    func openAccessibility() {
+        // Trigger the prompt as well so a system pop-up appears the first time.
+        let key = "AXTrustedCheckOptionPrompt" as CFString
+        _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
-    func openScreenRecordingPane() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-            NSWorkspace.shared.open(url)
+    func openScreenCapture() {
+        if #available(macOS 11.0, *) {
+            _ = CGRequestScreenCaptureAccess()
         }
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
     }
 }
