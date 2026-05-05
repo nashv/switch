@@ -42,23 +42,7 @@ final class StatusBarController {
     }
 
     @objc private func openSettings() {
-        // SwiftUI's Settings scene doesn't reliably show with .accessory
-        // activation policy. Send the action, then locate the window and
-        // force it front on the next runloop tick.
-        NSApp.activate(ignoringOtherApps: true)
-        if #available(macOS 14, *) {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        } else {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        }
-        DispatchQueue.main.async {
-            for window in NSApp.windows where window.title == "Switch Settings" || window.frameAutosaveName == "com_apple_SwiftUI_Settings_window" {
-                window.level = .floating
-                window.makeKeyAndOrderFront(nil)
-                window.level = .normal
-            }
-            NSApp.activate(ignoringOtherApps: true)
-        }
+        MainActor.assumeIsolated { SettingsWindow.shared.show() }
     }
 }
 
