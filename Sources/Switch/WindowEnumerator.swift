@@ -65,7 +65,7 @@ enum WindowEnumerator {
             return []
         }
         var out: [WindowInfo] = []
-        var seen: Set<String> = []
+        var seenIDs: Set<CGWindowID> = []
         for d in raw {
             let appName = d[kCGWindowOwnerName as String] as? String ?? ""
             // Diagnostic log for the reported Chrome-windows-not-appearing bug.
@@ -94,9 +94,11 @@ enum WindowEnumerator {
             )
             if bounds.width < 100 || bounds.height < 80 { continue }
             if title.isEmpty && (bounds.width < 400 || bounds.height < 300) { continue }
-            let dedupeKey = "\(pid):\(title):\(Int(bounds.width))x\(Int(bounds.height))"
-            if seen.contains(dedupeKey) { continue }
-            seen.insert(dedupeKey)
+            // Dedupe by CGWindowID only — it's already unique per window.
+            // The earlier (pid, title, bounds) dedupe was collapsing multiple
+            // Chrome windows that shared the same active-tab title.
+            if seenIDs.contains(id) { continue }
+            seenIDs.insert(id)
             if scope == .currentApp, let f = frontmostPID, pid != f { continue }
             out.append(WindowInfo(id: id, pid: pid, appName: appName, title: title, bounds: bounds))
         }
