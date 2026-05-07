@@ -16,23 +16,38 @@ private func axWindowID(_ element: AXUIElement) -> CGWindowID? {
 }
 
 enum WindowFocuser {
+    /// AX-raise FIRST, then activate the app. Reverse order loses races on
+    /// macOS 14+/26 because `.accessory` apps requesting cross-app activation
+    /// gets denied intermittently — picker dismisses, no switch happens.
+    /// AX-raise works regardless of activation state, so by the time activate
+    /// runs, the right window is already main and the system honors it.
     static func focus(_ window: WindowInfo) {
         let app = NSRunningApplication(processIdentifier: window.pid)
-        app?.activate()
+        if app?.isHidden == true { app?.unhide() }
 
         let appAX = AXUIElementCreateApplication(window.pid)
         var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appAX, kAXWindowsAttribute as CFString, &ref) == .success,
-              let axWindows = ref as? [AXUIElement] else {
-            WindowMRU.touch(window.id)
-            return
+        if AXUIElementCopyAttributeValue(appAX, kAXWindowsAttribute as CFString, &ref) == .success,
+           let axWindows = ref as? [AXUIElement],
+           let target = bestMatch(for: window, in: axWindows) ?? axWindows.first {
+            AXUIElementSetAttributeValue(target, kAXMainAttribute as CFString, kCFBooleanTrue)
+            AXUIElementPerformAction(target, kAXRaiseAction as CFString)
         }
 
-        let target = bestMatch(for: window, in: axWindows) ?? axWindows.first
-        if let target {
-            AXUIElementPerformAction(target, kAXRaiseAction as CFString)
-            AXUIElementSetAttributeValue(target, kAXMainAttribute as CFString, kCFBooleanTrue)
+        // Flip Switch from .accessory to .regular for the activation request,
+        // then flip back. Same trick that fixed SettingsWindow on macOS 26 —
+        // .accessory apps can't reliably activate other apps without it.
+        let originalPolicy = NSApp.activationPolicy()
+        if originalPolicy == .accessory {
+            NSApp.setActivationPolicy(.regular)
         }
+        app?.activate(options: [.activateAllWindows])
+        if originalPolicy == .accessory {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
+
         WindowMRU.touch(window.id)
     }
 

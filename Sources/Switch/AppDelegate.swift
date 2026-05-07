@@ -8,7 +8,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBar: StatusBarController?
     private var onboardingModel: OnboardingModel?
     private var onboardingWindow: NSWindow?
+    private var focusTracker: FocusTracker?
     private var hotkeyStarted = false
+    private var focusTrackerStarted = false
     private var permsTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -61,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.window = window
         self.statusBar = StatusBarController()
         self.onboardingModel = OnboardingModel()
+        self.focusTracker = FocusTracker()
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(showOnboarding),
@@ -78,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showOnboarding()
         } else {
             startHotkeyIfNeeded()
+            startFocusTrackerIfNeeded()
         }
 
         // Background poll: as soon as both are granted, install the tap.
@@ -85,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             if AXIsProcessTrusted() && CGPreflightScreenCaptureAccess() {
                 self.startHotkeyIfNeeded()
+                self.startFocusTrackerIfNeeded()
             }
         }
     }
@@ -93,6 +98,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !hotkeyStarted else { return }
         hotkey?.start()
         hotkeyStarted = true
+    }
+
+    private func startFocusTrackerIfNeeded() {
+        guard !focusTrackerStarted else { return }
+        focusTracker?.start()
+        focusTrackerStarted = true
     }
 
     @objc private func showOnboarding() {

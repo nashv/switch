@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CoreGraphics
 
 struct WindowInfo: Identifiable, Hashable {
@@ -57,7 +58,31 @@ enum WindowEnumerator {
         let crossSpace = everything
             .filter { !activeIDs.contains($0.id) }
             .map { var w = $0; w.isCrossSpace = true; return w }
-        return Enumeration(activeSpace: activeSpace, crossSpace: crossSpace)
+        // .optionAll surfaces orderOut'd-but-undestroyed windows (SwiftUI Settings
+        // scenes are notorious). AX kAXWindowsAttribute doesn't list those, so
+        // intersecting with AX-visible IDs drops the ghosts.
+        let filteredCross = filterAXVisible(crossSpace)
+        return Enumeration(activeSpace: activeSpace, crossSpace: filteredCross)
+    }
+
+    private static func filterAXVisible(_ candidates: [WindowInfo]) -> [WindowInfo] {
+        var visibleIDs: Set<CGWindowID> = []
+        var pidsScanned: Set<pid_t> = []
+        for w in candidates {
+            if pidsScanned.contains(w.pid) { continue }
+            pidsScanned.insert(w.pid)
+            let appAX = AXUIElementCreateApplication(w.pid)
+            var ref: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(appAX, kAXWindowsAttribute as CFString, &ref) == .success,
+                  let axWindows = ref as? [AXUIElement] else { continue }
+            for ax in axWindows {
+                var id: CGWindowID = 0
+                if _AXUIElementGetWindow(ax, &id) == .success, id != 0 {
+                    visibleIDs.insert(id)
+                }
+            }
+        }
+        return candidates.filter { visibleIDs.contains($0.id) }
     }
 
     private static func enumerate(option: CGWindowListOption, scope: HotkeyManager.Mode, frontmostPID: pid_t?) -> [WindowInfo] {

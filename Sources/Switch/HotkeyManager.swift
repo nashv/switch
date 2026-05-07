@@ -20,6 +20,9 @@ final class HotkeyManager {
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var armed: Mode?
+    private var wakeToken: NSObjectProtocol?
+    private var screensWakeToken: NSObjectProtocol?
+    private var healthTimer: Timer?
 
     private static let kcEscape: CGKeyCode = 53
     private static let kcDelete: CGKeyCode = 51
@@ -34,13 +37,59 @@ final class HotkeyManager {
     func start() {
         if !ensureAccessibility() { return }
         installTap()
+        installWakeObserver()
+        startHealthCheck()
     }
 
     func stop() {
+        uninstallTap()
+        if let wakeToken { NSWorkspace.shared.notificationCenter.removeObserver(wakeToken) }
+        if let screensWakeToken { NSWorkspace.shared.notificationCenter.removeObserver(screensWakeToken) }
+        wakeToken = nil
+        screensWakeToken = nil
+        healthTimer?.invalidate()
+        healthTimer = nil
+    }
+
+    private func uninstallTap() {
         if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let source { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes) }
         tap = nil
         source = nil
+    }
+
+    /// Sleep/wake + screensaver-end can leave the tap in a disabled state that
+    /// `tapDisabledByTimeout` doesn't always cover. Listen explicitly and
+    /// reinstall.
+    private func installWakeObserver() {
+        let nc = NSWorkspace.shared.notificationCenter
+        wakeToken = nc.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.reinstallIfNeeded()
+        }
+        screensWakeToken = nc.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.reinstallIfNeeded()
+        }
+    }
+
+    /// Defense in depth: even with timeout + wake handlers, occasionally a tap
+    /// ends up disabled (TCC blip, run-loop weirdness). Cheap to check.
+    private func startHealthCheck() {
+        healthTimer?.invalidate()
+        healthTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            self?.reinstallIfNeeded()
+        }
+    }
+
+    private func reinstallIfNeeded() {
+        if let tap, CGEvent.tapIsEnabled(tap: tap) { return }
+        uninstallTap()
+        installTap()
     }
 
     @discardableResult
@@ -174,9 +223,10 @@ final class HotkeyManager {
     }
 
     /// Reinstall the tap so the new HotkeyConfig is picked up. Called when bindings change.
+    /// Only touches the tap — wake observers + health timer stay in place.
     func reload() {
         guard tap != nil else { return }
-        stop()
+        uninstallTap()
         installTap()
     }
 

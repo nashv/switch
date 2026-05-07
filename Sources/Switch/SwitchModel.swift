@@ -31,12 +31,16 @@ final class SwitchModel: ObservableObject {
         self.mode = mode
         filterText = ""
         let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        // Trust the OS's z-order for active-Space windows — that already reflects focus history,
-        // including focus changes made outside Switch. Only the cross-Space half needs MRU sorting,
-        // since CGWindowList's order across Spaces is unreliable.
+        // FocusTracker keeps WindowMRU current across all focus events (Switch-driven
+        // and external clicks). MRU-sort active-Space too so that when an Arc window
+        // is raised, all OTHER Arc windows don't cluster ahead of the previously-focused
+        // window from a different app. CGWindowList z-order groups windows by app
+        // when any one is raised, which is the wrong signal for a window switcher.
         let enumeration = WindowEnumerator.enumerate(scope: mode, frontmostPID: frontmostPID)
+        let activeFront = enumeration.activeSpace.first
+        let activeSorted = WindowMRU.sorted(enumeration.activeSpace, frontmost: activeFront)
         let crossSorted = WindowMRU.sorted(enumeration.crossSpace, frontmost: nil)
-        let ws = enumeration.activeSpace + crossSorted
+        let ws = activeSorted + crossSorted
         WindowMRU.purge(keeping: Set(ws.map { $0.id }))
         windows = ws
         selected = ws.count > 1 ? 1 : 0
