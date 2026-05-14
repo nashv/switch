@@ -25,11 +25,8 @@ enum WindowFocuser {
         let app = NSRunningApplication(processIdentifier: window.pid)
         if app?.isHidden == true { app?.unhide() }
 
-        let appAX = AXUIElementCreateApplication(window.pid)
-        var ref: CFTypeRef?
-        if AXUIElementCopyAttributeValue(appAX, kAXWindowsAttribute as CFString, &ref) == .success,
-           let axWindows = ref as? [AXUIElement],
-           let target = bestMatch(for: window, in: axWindows) ?? axWindows.first {
+        let axWindows = AXHelpers.allWindows(for: window.pid)
+        if let target = bestMatch(for: window, in: axWindows) ?? axWindows.first {
             AXUIElementSetAttributeValue(target, kAXMainAttribute as CFString, kCFBooleanTrue)
             AXUIElementPerformAction(target, kAXRaiseAction as CFString)
         }
@@ -72,10 +69,8 @@ enum AppCloser {
 enum WindowCloser {
     /// Sends a close action to the AX window matching `window`. Best-effort.
     static func close(_ window: WindowInfo) {
-        let appAX = AXUIElementCreateApplication(window.pid)
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appAX, kAXWindowsAttribute as CFString, &ref) == .success,
-              let axWindows = ref as? [AXUIElement] else { return }
+        let axWindows = AXHelpers.allWindows(for: window.pid)
+        guard !axWindows.isEmpty else { return }
 
         // Direct CGWindowID match via private SPI, same as focus. Title
         // matching alone closed the wrong Chrome window when titles collided.
@@ -93,6 +88,22 @@ enum WindowCloser {
 }
 
 enum AXHelpers {
+    /// Returns all AX windows for `pid` across every Space.
+    /// Tries "AXAllWindows" first (cross-Space capable); falls back to
+    /// kAXWindowsAttribute (current-Space only) for apps that don't support it.
+    /// Ghost/orderOut'd windows are absent from both attributes, so the
+    /// ghost-removal behaviour elsewhere in the codebase is preserved.
+    static func allWindows(for pid: pid_t) -> [AXUIElement] {
+        let appAX = AXUIElementCreateApplication(pid)
+        var ref: CFTypeRef?
+        if AXUIElementCopyAttributeValue(appAX, "AXAllWindows" as CFString, &ref) == .success,
+           let windows = ref as? [AXUIElement] {
+            return windows
+        }
+        AXUIElementCopyAttributeValue(appAX, kAXWindowsAttribute as CFString, &ref)
+        return ref as? [AXUIElement] ?? []
+    }
+
     static func title(of element: AXUIElement) -> String {
         var ref: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &ref)

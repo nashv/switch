@@ -73,10 +73,10 @@ enum WindowEnumerator {
         for w in candidates {
             if pidsScanned.contains(w.pid) { continue }
             pidsScanned.insert(w.pid)
-            let appAX = AXUIElementCreateApplication(w.pid)
-            var ref: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(appAX, kAXWindowsAttribute as CFString, &ref) == .success,
-                  let axWindows = ref as? [AXUIElement] else { continue }
+            // AXHelpers.allWindows tries "AXAllWindows" first, which returns windows
+            // across all Spaces. Falling back to kAXWindowsAttribute (current Space
+            // only) would incorrectly drop windows living on other Spaces.
+            let axWindows = AXHelpers.allWindows(for: w.pid)
             for ax in axWindows {
                 var id: CGWindowID = 0
                 if _AXUIElementGetWindow(ax, &id) == .success, id != 0 {
